@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Upload report</h1>
+<form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
+    <div id="drop-zone" class="upload-drop-zone">
+        <p>Drag & drop file here or click to browse</p>
+        <span class="filename" id="file-name"></span>
+        <input type="file" id="file-input" name="file" accept=".xlsx" required />
+    </div>
+    <div class="row">
+        <button type="submit">Upload Now</button>
+    </div>
+</form>
+<p class="hint">Uploads are de-duplicated by file hash.</p>
+
+<script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const fileNameDisplay = document.getElementById('file-name');
+
+    ['dragover', 'dragenter'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('dragover');
+        });
+    });
+
+    ['dragleave', 'dragend', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('dragover');
+        });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        fileInput.files = files;
+        updateFileName(files[0]);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+        if (fileInput.files.length > 0) {
+            updateFileName(fileInput.files[0]);
+        }
+    });
+
+    function updateFileName(file) {
+        if (file) {
+            fileNameDisplay.textContent = `Selected: ${file.name}`;
+        } else {
+            fileNameDisplay.textContent = '';
+        }
+    }
+</script>
+{% endblock %}

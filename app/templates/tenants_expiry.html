@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Tenant expiry</h1>
+
+<form method="get" action="/tenants/expiry" class="row">
+    <label>Months:
+        <input type="number" name="months" value="{{ months }}" min="1" max="60" />
+    </label>
+    <label>Reference:
+        <select name="reference">
+            <option value="today" {% if reference=='today' %}selected{% endif %}>Today</option>
+            <option value="latest_report" {% if reference=='latest_report' %}selected{% endif %}>Latest report date
+            </option>
+        </select>
+    </label>
+    <button type="submit">Apply</button>
+</form>
+
+<p class="hint">Reference date: {{ ref }}. Cutoff: {{ cutoff }}.</p>
+
+<h2>Expired</h2>
+{% if expired %}
+<table>
+    <thead>
+        <tr>
+            <th>Expire date</th>
+            <th>Tenant</th>
+            <th>Customer</th>
+            <th>Customer ID</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in expired %}
+        <tr>
+            <td>{{ t.expire_date }}</td>
+            <td>{{ t.tenant_name }}</td>
+            <td>{{ t.customer_name }}</td>
+            <td>{{ t.customer_id }}</td>
+            <td><a href="/tenants/{{ t.customer_id }}">View</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>None.</p>
+{% endif %}
+
+<h2>Expiring in next {{ months }} months</h2>
+{% if expiring %}
+<table>
+    <thead>
+        <tr>
+            <th>Expire date</th>
+            <th>Tenant</th>
+            <th>Customer</th>
+            <th>Customer ID</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in expiring %}
+        <tr>
+            <td>{{ t.expire_date }}</td>
+            <td>{{ t.tenant_name }}</td>
+            <td>{{ t.customer_name }}</td>
+            <td>{{ t.customer_id }}</td>
+            <td><a href="/tenants/{{ t.customer_id }}">View</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>None.</p>
+{% endif %}
+
+{% endblock %}

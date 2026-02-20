@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Tenant search</h1>
+<form method="get" action="/tenants">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search tenant name or customer id" size="40" />
+    <button type="submit">Search</button>
+</form>
+
+{% if q and not results %}
+<p>No matches.</p>
+{% endif %}
+
+{% if results %}
+<table>
+    <thead>
+        <tr>
+            <th>Tenant</th>
+            <th>Customer</th>
+            <th>Customer ID</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for t in results %}
+        <tr>
+            <td>{{ t.tenant_name }}</td>
+            <td>{{ t.customer_name }}</td>
+            <td>{{ t.customer_id }}</td>
+            <td><a href="/tenants/{{ t.customer_id }}">View</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+{% endblock %}

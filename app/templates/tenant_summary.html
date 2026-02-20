@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Tenant: {{ tenant.tenant_name or tenant.customer_id }}</h1>
+
+<div class="cards">
+    <div class="card">
+        <div class="label">Customer ID</div>
+        <div class="value">{{ tenant.customer_id }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Customer Name</div>
+        <div class="value">{{ tenant.customer_name or "—" }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Reseller</div>
+        <div class="value">{{ tenant.reseller or "—" }}</div>
+    </div>
+    <div class="card">
+        <div class="label">Expire Date</div>
+        <div class="value">{{ tenant.expire_date or "—" }}</div>
+    </div>
+</div>
+
+<h2>Latest usage ({{ latest_report_date or "—" }})</h2>
+{% if latest_usage %}
+<table>
+    <tbody>
+        <tr>
+            <th>Used (GB)</th>
+            <td>{{ '%.2f'|format(latest_usage.used_storage_gb or 0) }}</td>
+        </tr>
+        <tr>
+            <th>Capacity (GB)</th>
+            <td>{{ '%.2f'|format(latest_usage.storage_capacity_gb or 0) }}</td>
+        </tr>
+        <tr>
+            <th>Usage (%)</th>
+            <td>{{ '%.2f'|format(latest_usage.storage_usage_pct or 0) }}</td>
+        </tr>
+        <tr>
+            <th>Exceeded (GB)</th>
+            <td>{{ '%.2f'|format(latest_usage.exceeded_storage_gb or 0) }}</td>
+        </tr>
+    </tbody>
+</table>
+{% else %}
+<p>No usage rows yet for this tenant.</p>
+{% endif %}
+
+<h2>Forecast</h2>
+{% if forecast and forecast.growth_gb_per_day is not none %}
+<ul>
+    <li>Growth rate: {{ '%.4f'|format(forecast.growth_gb_per_day) }} GB/day ({{
+        '%.2f'|format(forecast.growth_gb_per_day*30) }} GB/month approx).</li>
+    <li>Days to full: {{ (forecast.days_to_full is not none) and ('%.1f'|format(forecast.days_to_full)) or '—' }}.</li>
+</ul>
+{% else %}
+<p>Not enough data to forecast yet (need at least 2 reports).</p>
+{% endif %}
+
+<h2>History (last {{ history|length }})</h2>
+{% if history %}
+<table>
+    <thead>
+        <tr>
+            <th>Report date</th>
+            <th>Used (GB)</th>
+            <th>Capacity (GB)</th>
+            <th>Usage (%)</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for h in history %}
+        <tr>
+            <td>{{ h.report_date }}</td>
+            <td>{{ h.used_storage_gb }}</td>
+            <td>{{ h.storage_capacity_gb }}</td>
+            <td>{{ h.storage_usage_pct }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
+{% endblock %}

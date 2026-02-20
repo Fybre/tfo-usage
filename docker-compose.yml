@@ -1,0 +1,11 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_PATH=/data/app.db
+    volumes:
+      - tfo_usage:/app/data
+
+volumes: tfo_usage
