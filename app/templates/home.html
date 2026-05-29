@@ -46,4 +46,66 @@
 {% else %}
 <p>No reports uploaded yet.</p>
 {% endif %}
+
+{% if counts.latest_report_date and cards is defined %}
+<h2>Tenant cards ({{ counts.latest_report_date }})</h2>
+<form method="get" action="/" class="row">
+    <label>Show:
+        <select name="show">
+            <option value="issues" {% if show=='issues' %}selected{% endif %}>Issues only</option>
+            <option value="all" {% if show=='all' %}selected{% endif %}>All tenants</option>
+        </select>
+    </label>
+    <label>Sort:
+        <select name="sort">
+            <option value="severity" {% if sort=='severity' %}selected{% endif %}>Severity</option>
+            <option value="growth" {% if sort=='growth' %}selected{% endif %}>Growth (GB/day)</option>
+            <option value="days_to_full" {% if sort=='days_to_full' %}selected{% endif %}>Days to full (est)</option>
+            <option value="usage_pct" {% if sort=='usage_pct' %}selected{% endif %}>Usage (%)</option>
+            <option value="exceeded" {% if sort=='exceeded' %}selected{% endif %}>Exceeded (GB)</option>
+            <option value="days_to_expiry" {% if sort=='days_to_expiry' %}selected{% endif %}>Days to expiry</option>
+            <option value="tenant" {% if sort=='tenant' %}selected{% endif %}>Tenant name</option>
+        </select>
+    </label>
+    <label>Direction:
+        <select name="direction">
+            <option value="desc" {% if direction=='desc' %}selected{% endif %}>Desc</option>
+            <option value="asc" {% if direction=='asc' %}selected{% endif %}>Asc</option>
+        </select>
+    </label>
+    <button type="submit">Apply</button>
+</form>
+
+{% if not cards %}
+<p>Nothing to show for this filter.</p>
+{% else %}
+<div class="cards cards-wide">
+    {% for c in cards %}
+    <div class="card tenant-card tenant-card--{{ c.severity }}">
+        <div class="label">
+            <a href="/tenants/{{ c.customer_id }}">{{ c.tenant_name or c.customer_id }}</a>
+        </div>
+        <div class="hint">{{ c.customer_name or "—" }}</div>
+        <div class="tenant-metrics">
+            <div><span class="metric-label">Usage</span>
+                <span class="metric-value">{{ (c.usage_pct is not none) and ('%.1f'|format(c.usage_pct)) or '—' }}%</span>
+            </div>
+            <div><span class="metric-label">Exceeded</span>
+                <span class="metric-value">{{ (c.exceeded_gb is not none) and ('%.2f'|format(c.exceeded_gb)) or '—' }} GB</span>
+            </div>
+            <div><span class="metric-label">Growth</span>
+                <span class="metric-value">{{ (c.growth_gb_per_day is not none) and ('%.4f'|format(c.growth_gb_per_day)) or '—' }} GB/day</span>
+            </div>
+            <div><span class="metric-label">Days to full</span>
+                <span class="metric-value">{{ (c.days_to_full is not none) and ('%.1f'|format(c.days_to_full)) or '—' }}</span>
+            </div>
+            <div><span class="metric-label">Days to expiry</span>
+                <span class="metric-value">{{ c.days_to_expiry is not none and c.days_to_expiry or '—' }}</span>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endif %}
 {% endblock %}

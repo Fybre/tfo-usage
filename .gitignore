@@ -1,0 +1,14 @@
+# OS / local env
+.DS_Store
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Runtime data
+data/
+app/data/*
+!app/data/.gitkeep
