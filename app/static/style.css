@@ -146,3 +146,9 @@ select {
   font-weight: 600;
   margin-left: 0.35rem;
 }
+.status-error td {
+  color: #b23b3b;
+}
+.status-duplicate td {
+  color: #888;
+}

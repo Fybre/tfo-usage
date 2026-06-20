@@ -71,11 +71,11 @@ def _to_float(value):
         return None
 
 
-def ingest_report(session, filename: str, content: bytes) -> ReportUpload:
+def ingest_report(session, filename: str, content: bytes) -> tuple[ReportUpload, bool]:
     file_hash = _file_hash_bytes(content)
     existing = session.execute(select(ReportUpload).where(ReportUpload.file_hash == file_hash)).scalar_one_or_none()
     if existing:
-        return existing
+        return existing, False
 
     tmp = Path("/tmp") / f"upload_{file_hash}.xlsx"
     tmp.write_bytes(content)
@@ -131,4 +131,4 @@ def ingest_report(session, filename: str, content: bytes) -> ReportUpload:
         session.add(usage)
 
     session.commit()
-    return upload
+    return upload, True

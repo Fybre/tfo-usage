@@ -3,15 +3,44 @@
 <h1>Upload report</h1>
 <form id="upload-form" action="/upload" method="post" enctype="multipart/form-data">
     <div id="drop-zone" class="upload-drop-zone">
-        <p>Drag & drop file here or click to browse</p>
+        <p>Drag & drop one or more files here or click to browse</p>
         <span class="filename" id="file-name"></span>
-        <input type="file" id="file-input" name="file" accept=".xlsx" required />
+        <input type="file" id="file-input" name="files" accept=".xlsx" multiple required />
     </div>
     <div class="row">
         <button type="submit">Upload Now</button>
     </div>
 </form>
-<p class="hint">Uploads are de-duplicated by file hash.</p>
+<p class="hint">Select multiple files to bulk (re-)import a whole folder of reports at once. Uploads are de-duplicated by file hash, so re-importing an already-imported file is a no-op.</p>
+
+{% if results %}
+<h2>Import results</h2>
+<table class="results-table">
+    <thead>
+        <tr>
+            <th>File</th>
+            <th>Status</th>
+            <th>Report date</th>
+            <th>Rows</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in results %}
+        <tr class="status-{{ r.status }}">
+            <td>{{ r.filename }}</td>
+            <td>
+                {% if r.status == 'imported' %}Imported
+                {% elif r.status == 'duplicate' %}Already imported (skipped)
+                {% else %}Error: {{ r.error }}
+                {% endif %}
+            </td>
+            <td>{{ r.report_date or '' }}</td>
+            <td>{{ r.row_count if r.row_count is not none else '' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
 
 <script>
     const dropZone = document.getElementById('drop-zone');
@@ -38,18 +67,20 @@
         const dt = e.dataTransfer;
         const files = dt.files;
         fileInput.files = files;
-        updateFileName(files[0]);
+        updateFileNames(files);
     });
 
     fileInput.addEventListener('change', (e) => {
-        if (fileInput.files.length > 0) {
-            updateFileName(fileInput.files[0]);
-        }
+        updateFileNames(fileInput.files);
     });
 
-    function updateFileName(file) {
-        if (file) {
-            fileNameDisplay.textContent = `Selected: ${file.name}`;
+    function updateFileNames(files) {
+        if (files && files.length > 0) {
+            if (files.length === 1) {
+                fileNameDisplay.textContent = `Selected: ${files[0].name}`;
+            } else {
+                fileNameDisplay.textContent = `Selected ${files.length} files: ${Array.from(files).map(f => f.name).join(', ')}`;
+            }
         } else {
             fileNameDisplay.textContent = '';
         }

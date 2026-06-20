@@ -228,15 +228,33 @@ def home(
 
 @app.get("/upload", response_class=HTMLResponse)
 def upload_form(request: Request):
-    return templates.TemplateResponse("upload.html", {"request": request})
+    return templates.TemplateResponse("upload.html", {"request": request, "results": None})
 
 
-@app.post("/upload")
-async def upload(file: UploadFile = File(...)):
-    content = await file.read()
+@app.post("/upload", response_class=HTMLResponse)
+async def upload(request: Request, files: list[UploadFile] = File(...)):
+    results = []
     with SessionLocal() as session:
-        ingest_report(session, file.filename, content)
-    return RedirectResponse(url="/", status_code=303)
+        for file in files:
+            content = await file.read()
+            try:
+                upload, created = ingest_report(session, file.filename, content)
+                results.append(
+                    {
+                        "filename": file.filename,
+                        "status": "imported" if created else "duplicate",
+                        "report_date": upload.report_date,
+                        "row_count": upload.row_count,
+                    }
+                )
+            except Exception as exc:
+                session.rollback()
+                results.append({"filename": file.filename, "status": "error", "error": str(exc)})
+
+    if len(files) == 1 and results and results[0]["status"] != "error":
+        return RedirectResponse(url="/", status_code=303)
+
+    return templates.TemplateResponse("upload.html", {"request": request, "results": results})
 
 
 @app.get("/tenants", response_class=HTMLResponse)
