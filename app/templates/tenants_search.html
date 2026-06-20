@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Tenant search</h1>
-<form method="get" action="/tenants">
-    <input type="text" name="q" value="{{ q }}" placeholder="Search tenant name or customer id" size="40" />
-    <button type="submit">Search</button>
+<form method="get" action="/tenants" class="filter-row">
+    <input type="text" class="form-control" style="max-width: 320px;" name="q" value="{{ q }}"
+        placeholder="Search tenant name or customer id" />
+    <button type="submit" class="btn btn-primary">Search</button>
 </form>
 
 {% if q and not results %}
@@ -11,7 +12,7 @@
 {% endif %}
 
 {% if results %}
-<table>
+<table class="table table-sm table-hover">
     <thead>
         <tr>
             <th>Tenant</th>
@@ -26,7 +27,7 @@
             <td>{{ t.tenant_name }}</td>
             <td>{{ t.customer_name }}</td>
             <td>{{ t.customer_id }}</td>
-            <td><a href="/tenants/{{ t.customer_id }}">View</a></td>
+            <td><a class="btn btn-sm btn-primary" href="/tenants/{{ t.customer_id }}">View</a></td>
         </tr>
         {% endfor %}
     </tbody>

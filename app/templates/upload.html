@@ -8,14 +8,14 @@
         <input type="file" id="file-input" name="files" accept=".xlsx" multiple required />
     </div>
     <div class="filter-row">
-        <button type="submit">Upload Now</button>
+        <button type="submit" class="btn btn-primary">Upload Now</button>
     </div>
 </form>
 <p class="hint">Select multiple files to bulk (re-)import a whole folder of reports at once. Uploads are de-duplicated by file hash, so re-importing an already-imported file is a no-op.</p>
 
 {% if results %}
 <h2>Import results</h2>
-<table class="results-table">
+<table class="table table-sm table-bordered results-table">
     <thead>
         <tr>
             <th>File</th>

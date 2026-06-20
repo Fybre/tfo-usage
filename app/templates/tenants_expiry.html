@@ -3,24 +3,25 @@
 <h1>Tenant expiry</h1>
 
 <form method="get" action="/tenants/expiry" class="filter-row">
-    <label>Months:
-        <input type="number" name="months" value="{{ months }}" min="1" max="60" />
+    <label class="d-flex align-items-center gap-2">Months:
+        <input type="number" class="form-control" style="width: 90px;" name="months" value="{{ months }}" min="1"
+            max="60" />
     </label>
-    <label>Reference:
-        <select name="reference">
+    <label class="d-flex align-items-center gap-2">Reference:
+        <select class="form-select" style="width: auto;" name="reference">
             <option value="today" {% if reference=='today' %}selected{% endif %}>Today</option>
             <option value="latest_report" {% if reference=='latest_report' %}selected{% endif %}>Latest report date
             </option>
         </select>
     </label>
-    <button type="submit">Apply</button>
+    <button type="submit" class="btn btn-primary">Apply</button>
 </form>
 
 <p class="hint">Reference date: {{ ref }}. Cutoff: {{ cutoff }}.</p>
 
 <h2>Expired</h2>
 {% if expired %}
-<table>
+<table class="table table-sm table-hover">
     <thead>
         <tr>
             <th>Expire date</th>
@@ -37,7 +38,7 @@
             <td>{{ t.tenant_name }}</td>
             <td>{{ t.customer_name }}</td>
             <td>{{ t.customer_id }}</td>
-            <td><a href="/tenants/{{ t.customer_id }}">View</a></td>
+            <td><a class="btn btn-sm btn-primary" href="/tenants/{{ t.customer_id }}">View</a></td>
         </tr>
         {% endfor %}
     </tbody>
@@ -48,7 +49,7 @@
 
 <h2>Expiring in next {{ months }} months</h2>
 {% if expiring %}
-<table>
+<table class="table table-sm table-hover">
     <thead>
         <tr>
             <th>Expire date</th>
@@ -65,7 +66,7 @@
             <td>{{ t.tenant_name }}</td>
             <td>{{ t.customer_name }}</td>
             <td>{{ t.customer_id }}</td>
-            <td><a href="/tenants/{{ t.customer_id }}">View</a></td>
+            <td><a class="btn btn-sm btn-primary" href="/tenants/{{ t.customer_id }}">View</a></td>
         </tr>
         {% endfor %}
     </tbody>

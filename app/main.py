@@ -69,11 +69,6 @@ def _days_to_expiry(expire_date: date | None, reference: date | None) -> int | N
     return (expire_date - reference).days
 
 
-def _safe_div(n: float | None, d: float | None) -> float | None:
-    if n is None or d is None or d == 0:
-        return None
-    return n / d
-
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request, q: str = "", submitted: str = "", hide_expired: str = ""):
@@ -88,83 +83,41 @@ def home(request: Request, q: str = "", submitted: str = "", hide_expired: str =
 
         cards: list[TenantCard] = []
         if latest:
-            latest_usage_sq = (
-                select(
-                    TenantUsage.customer_id.label("customer_id"),
-                    TenantUsage.used_storage_gb.label("used_gb"),
-                    TenantUsage.storage_capacity_gb.label("capacity_gb"),
-                    TenantUsage.storage_usage_pct.label("usage_pct"),
-                    TenantUsage.exceeded_storage_gb.label("exceeded_gb"),
-                    TenantUsage.concurrent_users.label("concurrent_users"),
-                    TenantUsage.named_users.label("named_users"),
-                    TenantUsage.read_only_users.label("read_only_users"),
-                    TenantUsage.document_count.label("document_count"),
-                )
-                .where(TenantUsage.report_date == latest)
-                .subquery()
-            )
+            tenants = session.execute(select(Tenant)).scalars().all()
 
-            prev_report_date_sq = (
-                select(func.max(TenantUsage.report_date))
-                .where(TenantUsage.customer_id == Tenant.customer_id, TenantUsage.report_date < latest)
-                .correlate(Tenant)
-                .scalar_subquery()
-            )
+            usage_rows = session.execute(
+                select(TenantUsage).order_by(TenantUsage.customer_id, TenantUsage.report_date)
+            ).scalars().all()
 
-            prev_used_sq = (
-                select(TenantUsage.used_storage_gb)
-                .where(TenantUsage.customer_id == Tenant.customer_id, TenantUsage.report_date == prev_report_date_sq)
-                .correlate(Tenant)
-                .scalar_subquery()
-            )
+            history_by_tenant: dict[str, list[TenantUsage]] = {}
+            for u in usage_rows:
+                history_by_tenant.setdefault(u.customer_id, []).append(u)
 
-            prev_date_sq = prev_report_date_sq.label("prev_report_date")
+            for tenant in tenants:
+                hist = history_by_tenant.get(tenant.customer_id)
+                if not hist or hist[-1].report_date != latest:
+                    continue
 
-            rows = session.execute(
-                select(
-                    Tenant,
-                    latest_usage_sq.c.used_gb,
-                    latest_usage_sq.c.capacity_gb,
-                    latest_usage_sq.c.usage_pct,
-                    latest_usage_sq.c.exceeded_gb,
-                    latest_usage_sq.c.concurrent_users,
-                    latest_usage_sq.c.named_users,
-                    latest_usage_sq.c.read_only_users,
-                    latest_usage_sq.c.document_count,
-                    prev_used_sq.label("prev_used_gb"),
-                    prev_date_sq,
-                )
-                .join(latest_usage_sq, latest_usage_sq.c.customer_id == Tenant.customer_id)
-            ).all()
+                latest_usage = hist[-1]
+                used_gb = latest_usage.used_storage_gb
+                capacity_gb = latest_usage.storage_capacity_gb
+                exceeded_gb = latest_usage.exceeded_storage_gb
+                concurrent_users = latest_usage.concurrent_users
+                named_users = latest_usage.named_users
+                read_only_users = latest_usage.read_only_users
+                document_count = latest_usage.document_count
 
-            for (
-                tenant,
-                used_gb,
-                capacity_gb,
-                usage_pct,
-                exceeded_gb,
-                concurrent_users,
-                named_users,
-                read_only_users,
-                document_count,
-                prev_used_gb,
-                prev_report_date,
-            ) in rows:
-                if capacity_gb:
-                    usage_pct = (used_gb or 0) / capacity_gb * 100.0
+                usage_pct = (used_gb or 0) / capacity_gb * 100.0 if capacity_gb else (latest_usage.storage_usage_pct or 0)
 
-                growth = None
-                if used_gb is not None and prev_used_gb is not None and prev_report_date:
-                    day_span = (latest - prev_report_date).days
-                    growth = _safe_div(used_gb - prev_used_gb, float(day_span)) if day_span > 0 else None
+                dates = [h.report_date for h in hist]
+                used_series = [h.used_storage_gb for h in hist]
+                forecast = forecast_linear(dates, used_series, capacity_gb)
+                growth = forecast.growth_gb_per_day
+                days_to_full = forecast.days_to_full
 
-                days_to_full = None
                 est_full_date = None
-                if growth is not None and growth > 0 and used_gb is not None and capacity_gb is not None:
-                    remaining = capacity_gb - used_gb
-                    days_to_full = 0.0 if remaining <= 0 else remaining / growth
-                    if days_to_full <= 50 * 365:
-                        est_full_date = latest + timedelta(days=days_to_full)
+                if days_to_full is not None and days_to_full <= 50 * 365:
+                    est_full_date = latest + timedelta(days=days_to_full)
 
                 days_to_expiry = _days_to_expiry(tenant.expire_date, latest)
 
@@ -299,6 +252,49 @@ def tenants_search_page(request: Request, q: str | None = None):
         return templates.TemplateResponse("tenants_search.html", {"request": request, "q": q or "", "results": results})
 
 
+@app.get("/tenants/expiry", response_class=HTMLResponse)
+def tenants_expiry(request: Request, months: int = DEFAULT_EXPIRY_MONTHS, reference: str = "today"):
+    with SessionLocal() as session:
+        ref = date.today()
+        if reference == "latest_report":
+            ref = _latest_report_date(session) or ref
+
+        cutoff = ref + relativedelta(months=months)
+
+        expired = (
+            session.execute(
+                select(Tenant)
+                .where(Tenant.expire_date.is_not(None), Tenant.expire_date < ref)
+                .order_by(Tenant.expire_date.asc())
+            )
+            .scalars()
+            .all()
+        )
+
+        expiring = (
+            session.execute(
+                select(Tenant)
+                .where(Tenant.expire_date.is_not(None), Tenant.expire_date >= ref, Tenant.expire_date < cutoff)
+                .order_by(Tenant.expire_date.asc())
+            )
+            .scalars()
+            .all()
+        )
+
+        return templates.TemplateResponse(
+            "tenants_expiry.html",
+            {
+                "request": request,
+                "months": months,
+                "reference": reference,
+                "ref": ref,
+                "cutoff": cutoff,
+                "expired": expired,
+                "expiring": expiring,
+            },
+        )
+
+
 @app.get("/tenants/{customer_id}", response_class=HTMLResponse)
 def tenant_summary(request: Request, customer_id: str):
     with SessionLocal() as session:
@@ -423,46 +419,3 @@ async def backup_restore(file: UploadFile = File(...)):
     DB_PATH.write_bytes(content)
 
     return RedirectResponse(url="/backup", status_code=303)
-
-
-@app.get("/tenants/expiry", response_class=HTMLResponse)
-def tenants_expiry(request: Request, months: int = DEFAULT_EXPIRY_MONTHS, reference: str = "today"):
-    with SessionLocal() as session:
-        ref = date.today()
-        if reference == "latest_report":
-            ref = _latest_report_date(session) or ref
-
-        cutoff = ref + relativedelta(months=months)
-
-        expired = (
-            session.execute(
-                select(Tenant)
-                .where(Tenant.expire_date.is_not(None), Tenant.expire_date < ref)
-                .order_by(Tenant.expire_date.asc())
-            )
-            .scalars()
-            .all()
-        )
-
-        expiring = (
-            session.execute(
-                select(Tenant)
-                .where(Tenant.expire_date.is_not(None), Tenant.expire_date >= ref, Tenant.expire_date < cutoff)
-                .order_by(Tenant.expire_date.asc())
-            )
-            .scalars()
-            .all()
-        )
-
-        return templates.TemplateResponse(
-            "tenants_expiry.html",
-            {
-                "request": request,
-                "months": months,
-                "reference": reference,
-                "ref": ref,
-                "cutoff": cutoff,
-                "expired": expired,
-                "expiring": expiring,
-            },
-        )

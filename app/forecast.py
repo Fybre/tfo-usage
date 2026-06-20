@@ -31,6 +31,6 @@ def forecast_linear(dates: list[date], used_gb: list[float | None], capacity_gb:
 
     remaining = capacity_gb - current_used
     if remaining <= 0:
-        return ForecastResult(growth, 0.0)
+        return ForecastResult(growth, None)
 
     return ForecastResult(growth, float(remaining / growth))
