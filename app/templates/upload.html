@@ -42,6 +42,41 @@
 </table>
 {% endif %}
 
+<h2 class="mt-4">Upload history</h2>
+<p class="hint">Deleting an upload also removes the usage rows it added to tenant histories. This cannot be undone.</p>
+
+{% if not uploads %}
+<p>No uploads yet.</p>
+{% else %}
+<table class="table table-sm table-hover">
+    <thead>
+        <tr>
+            <th>Uploaded at</th>
+            <th>Filename</th>
+            <th>Report date</th>
+            <th>Rows</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for u in uploads %}
+        <tr>
+            <td>{{ u.uploaded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ u.source_filename }}</td>
+            <td>{{ u.report_date }}</td>
+            <td>{{ u.row_count }}</td>
+            <td>
+                <form method="post" action="/upload/{{ u.id }}/delete"
+                    onsubmit="return confirm('Delete this upload and all {{ u.row_count }} usage rows it added? This cannot be undone.');">
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endif %}
+
 <script>
     const dropZone = document.getElementById('drop-zone');
     const fileInput = document.getElementById('file-input');

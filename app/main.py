@@ -194,9 +194,16 @@ def home(request: Request, q: str = "", submitted: str = "", hide_expired: str =
         )
 
 
+def _upload_history(session):
+    return session.execute(select(ReportUpload).order_by(ReportUpload.uploaded_at.desc())).scalars().all()
+
+
 @app.get("/upload", response_class=HTMLResponse)
 def upload_form(request: Request):
-    return templates.TemplateResponse("upload.html", {"request": request, "results": None})
+    with SessionLocal() as session:
+        return templates.TemplateResponse(
+            "upload.html", {"request": request, "results": None, "uploads": _upload_history(session)}
+        )
 
 
 @app.post("/upload", response_class=HTMLResponse)
@@ -219,22 +226,15 @@ async def upload(request: Request, files: list[UploadFile] = File(...)):
                 session.rollback()
                 results.append({"filename": file.filename, "status": "error", "error": str(exc)})
 
-    if len(files) == 1 and results and results[0]["status"] != "error":
-        return RedirectResponse(url="/", status_code=303)
+        if len(files) == 1 and results and results[0]["status"] != "error":
+            return RedirectResponse(url="/", status_code=303)
 
-    return templates.TemplateResponse("upload.html", {"request": request, "results": results})
-
-
-@app.get("/uploads", response_class=HTMLResponse)
-def uploads_page(request: Request):
-    with SessionLocal() as session:
-        uploads = session.execute(
-            select(ReportUpload).order_by(ReportUpload.uploaded_at.desc())
-        ).scalars().all()
-        return templates.TemplateResponse("uploads.html", {"request": request, "uploads": uploads})
+        return templates.TemplateResponse(
+            "upload.html", {"request": request, "results": results, "uploads": _upload_history(session)}
+        )
 
 
-@app.post("/uploads/{upload_id}/delete")
+@app.post("/upload/{upload_id}/delete")
 def delete_upload(upload_id: int):
     with SessionLocal() as session:
         upload = session.get(ReportUpload, upload_id)
@@ -245,7 +245,7 @@ def delete_upload(upload_id: int):
         session.delete(upload)
         session.commit()
 
-    return RedirectResponse(url="/uploads", status_code=303)
+    return RedirectResponse(url="/upload", status_code=303)
 
 
 @app.get("/tenants", response_class=HTMLResponse)
