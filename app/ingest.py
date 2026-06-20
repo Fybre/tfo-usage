@@ -81,6 +81,17 @@ def _to_int(value):
     return None if f is None else int(f)
 
 
+def _clean_str(value) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
 def ingest_report(session, filename: str, content: bytes) -> tuple[ReportUpload, bool]:
     file_hash = _file_hash_bytes(content)
     existing = session.execute(select(ReportUpload).where(ReportUpload.file_hash == file_hash)).scalar_one_or_none()
@@ -90,6 +101,7 @@ def ingest_report(session, filename: str, content: bytes) -> tuple[ReportUpload,
     tmp = Path("/tmp") / f"upload_{file_hash}.xlsx"
     tmp.write_bytes(content)
     df = pd.read_excel(tmp, engine="openpyxl")
+    df = df.dropna(how="all")
 
     report_dt = pd.to_datetime(df[COL_REPORT_DATE].iloc[0], errors="coerce")
     if pd.isna(report_dt):
@@ -107,7 +119,7 @@ def ingest_report(session, filename: str, content: bytes) -> tuple[ReportUpload,
     session.flush()
 
     for _, row in df.iterrows():
-        customer_id = str(row.get(COL_CUSTOMER_ID, "") or "").strip()
+        customer_id = _clean_str(row.get(COL_CUSTOMER_ID))
         if not customer_id:
             continue
 
@@ -116,9 +128,9 @@ def ingest_report(session, filename: str, content: bytes) -> tuple[ReportUpload,
             tenant = Tenant(customer_id=customer_id)
             session.add(tenant)
 
-        tenant.tenant_name = (str(row.get(COL_TENANT_NAME, "") or "").strip() or tenant.tenant_name)
-        tenant.customer_name = (str(row.get(COL_CUSTOMER_NAME, "") or "").strip() or tenant.customer_name)
-        tenant.reseller = (str(row.get(COL_RESELLER, "") or "").strip() or tenant.reseller)
+        tenant.tenant_name = _clean_str(row.get(COL_TENANT_NAME)) or tenant.tenant_name
+        tenant.customer_name = _clean_str(row.get(COL_CUSTOMER_NAME)) or tenant.customer_name
+        tenant.reseller = _clean_str(row.get(COL_RESELLER)) or tenant.reseller
 
         exp = _to_date(row.get(COL_EXPIRE_DATE))
         if exp:
