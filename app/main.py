@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from dateutil.relativedelta import relativedelta
-from fastapi import FastAPI, File, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc, func, select
@@ -314,6 +315,45 @@ def tenant_summary(request: Request, customer_id: str):
                 "forecast": forecast,
             },
         )
+
+
+@app.get("/backup", response_class=HTMLResponse)
+def backup_page(request: Request):
+    db_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+    return templates.TemplateResponse(
+        "backup.html",
+        {"request": request, "db_size": db_size},
+    )
+
+
+@app.get("/backup/download")
+def backup_download():
+    if not DB_PATH.exists():
+        raise HTTPException(status_code=404, detail="Database file not found")
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    return FileResponse(
+        DB_PATH,
+        media_type="application/octet-stream",
+        filename=f"tfo-usage-backup-{stamp}.db",
+    )
+
+
+@app.post("/backup/restore")
+async def backup_restore(file: UploadFile = File(...)):
+    content = await file.read()
+    if content[:16] != b"SQLite format 3\x00":
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid SQLite database")
+
+    engine.dispose()
+
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    pre_restore_backup = DATA_DIR / f"pre-restore-{stamp}.db"
+    if DB_PATH.exists():
+        shutil.copy2(DB_PATH, pre_restore_backup)
+
+    DB_PATH.write_bytes(content)
+
+    return RedirectResponse(url="/backup", status_code=303)
 
 
 @app.get("/tenants/expiry", response_class=HTMLResponse)
