@@ -7,16 +7,17 @@ from pathlib import Path
 
 from dateutil.relativedelta import relativedelta
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from .config import DATA_DIR, DB_PATH, DEFAULT_EXPIRY_MONTHS, IMMINENT_DAYS
 from .db import make_session_factory, sqlite_engine
 from .forecast import forecast_linear
 from .ingest import ingest_report
 from .models import Base, ReportUpload, Tenant, TenantUsage
+from .pdf_report import build_tenant_report_pdf
 
 app = FastAPI(title="TFO Usage (internal)")
 
@@ -224,6 +225,29 @@ async def upload(request: Request, files: list[UploadFile] = File(...)):
     return templates.TemplateResponse("upload.html", {"request": request, "results": results})
 
 
+@app.get("/uploads", response_class=HTMLResponse)
+def uploads_page(request: Request):
+    with SessionLocal() as session:
+        uploads = session.execute(
+            select(ReportUpload).order_by(ReportUpload.uploaded_at.desc())
+        ).scalars().all()
+        return templates.TemplateResponse("uploads.html", {"request": request, "uploads": uploads})
+
+
+@app.post("/uploads/{upload_id}/delete")
+def delete_upload(upload_id: int):
+    with SessionLocal() as session:
+        upload = session.get(ReportUpload, upload_id)
+        if upload is None:
+            raise HTTPException(status_code=404, detail="Upload not found")
+
+        session.execute(delete(TenantUsage).where(TenantUsage.report_upload_id == upload_id))
+        session.delete(upload)
+        session.commit()
+
+    return RedirectResponse(url="/uploads", status_code=303)
+
+
 @app.get("/tenants", response_class=HTMLResponse)
 def tenants_search_page(request: Request, q: str | None = None):
     with SessionLocal() as session:
@@ -295,91 +319,118 @@ def tenants_expiry(request: Request, months: int = DEFAULT_EXPIRY_MONTHS, refere
         )
 
 
+def _build_tenant_context(session, customer_id: str) -> dict | None:
+    tenant = session.get(Tenant, customer_id)
+    if not tenant:
+        return None
+
+    latest = _latest_report_date(session)
+    latest_usage = None
+    if latest:
+        latest_usage = session.execute(
+            select(TenantUsage).where(TenantUsage.customer_id == customer_id, TenantUsage.report_date == latest)
+        ).scalar_one_or_none()
+
+    hist = (
+        session.execute(
+            select(TenantUsage)
+            .where(TenantUsage.customer_id == customer_id)
+            .order_by(TenantUsage.report_date.desc())
+        )
+        .scalars()
+        .all()
+    )
+    hist = list(reversed(hist))
+
+    forecast = None
+    days_to_expiry = None
+    over_capacity = False
+    eta_within_threshold = False
+    expired = False
+    expiry_within_threshold = False
+    est_full_date = None
+    latest_usage_pct = None
+
+    if hist:
+        dates = [h.report_date for h in hist]
+        used = [h.used_storage_gb for h in hist]
+        cap = hist[-1].storage_capacity_gb if hist[-1].storage_capacity_gb is not None else None
+        forecast = forecast_linear(dates, used, cap)
+
+        days_to_expiry = _days_to_expiry(tenant.expire_date, latest_usage.report_date if latest_usage else None)
+        expired = (days_to_expiry is not None) and (days_to_expiry < 0)
+        expiry_within_threshold = (days_to_expiry is not None) and (0 <= days_to_expiry <= IMMINENT_DAYS)
+
+        if latest_usage:
+            used_gb = latest_usage.used_storage_gb
+            capacity_gb = latest_usage.storage_capacity_gb
+            latest_usage_pct = (used_gb or 0) / capacity_gb * 100.0 if capacity_gb else (latest_usage.storage_usage_pct or 0)
+            over_capacity = (
+                (capacity_gb and used_gb is not None and used_gb > capacity_gb)
+                or (latest_usage_pct > 100.0)
+                or ((latest_usage.exceeded_storage_gb or 0) > 0)
+            )
+
+        if forecast.days_to_full is not None:
+            eta_within_threshold = forecast.days_to_full <= IMMINENT_DAYS
+            if forecast.days_to_full <= 50 * 365 and latest_usage:
+                est_full_date = latest_usage.report_date + timedelta(days=forecast.days_to_full)
+
+    return {
+        "tenant": tenant,
+        "latest_report_date": latest,
+        "latest_usage": latest_usage,
+        "latest_usage_pct": latest_usage_pct,
+        "history": hist,
+        "forecast": forecast,
+        "imminent_days": IMMINENT_DAYS,
+        "days_to_expiry": days_to_expiry,
+        "over_capacity": over_capacity,
+        "eta_within_threshold": eta_within_threshold,
+        "expired": expired,
+        "expiry_within_threshold": expiry_within_threshold,
+        "est_full_date": est_full_date,
+    }
+
+
 @app.get("/tenants/{customer_id}", response_class=HTMLResponse)
 def tenant_summary(request: Request, customer_id: str):
     with SessionLocal() as session:
-        tenant = session.get(Tenant, customer_id)
-        if not tenant:
+        ctx = _build_tenant_context(session, customer_id)
+        if ctx is None:
             return templates.TemplateResponse(
                 "not_found.html",
                 {"request": request, "message": "Tenant not found"},
                 status_code=404,
             )
 
-        latest = _latest_report_date(session)
-        latest_usage = None
-        if latest:
-            latest_usage = session.execute(
-                select(TenantUsage).where(TenantUsage.customer_id == customer_id, TenantUsage.report_date == latest)
-            ).scalar_one_or_none()
-
-        hist = (
-            session.execute(
-                select(TenantUsage)
-                .where(TenantUsage.customer_id == customer_id)
-                .order_by(TenantUsage.report_date.desc())
-            )
-            .scalars()
-            .all()
-        )
-        hist = list(reversed(hist))
-
-        forecast = None
-        days_to_expiry = None
-        over_capacity = False
-        eta_within_threshold = False
-        expired = False
-        expiry_within_threshold = False
-        est_full_date = None
-        latest_usage_pct = None
-
-        if hist:
-            dates = [h.report_date for h in hist]
-            used = [h.used_storage_gb for h in hist]
-            cap = hist[-1].storage_capacity_gb if hist[-1].storage_capacity_gb is not None else None
-            forecast = forecast_linear(dates, used, cap)
-
-            days_to_expiry = _days_to_expiry(tenant.expire_date, latest_usage.report_date if latest_usage else None)
-            expired = (days_to_expiry is not None) and (days_to_expiry < 0)
-            expiry_within_threshold = (days_to_expiry is not None) and (0 <= days_to_expiry <= IMMINENT_DAYS)
-
-            if latest_usage:
-                used_gb = latest_usage.used_storage_gb
-                capacity_gb = latest_usage.storage_capacity_gb
-                latest_usage_pct = (used_gb or 0) / capacity_gb * 100.0 if capacity_gb else (latest_usage.storage_usage_pct or 0)
-                over_capacity = (
-                    (capacity_gb and used_gb is not None and used_gb > capacity_gb)
-                    or (latest_usage_pct > 100.0)
-                    or ((latest_usage.exceeded_storage_gb or 0) > 0)
-                )
-
-            if forecast.days_to_full is not None:
-                eta_within_threshold = forecast.days_to_full <= IMMINENT_DAYS
-                if forecast.days_to_full <= 50 * 365 and latest_usage:
-                    est_full_date = latest_usage.report_date + timedelta(days=forecast.days_to_full)
-
+        hist = ctx["history"]
         return templates.TemplateResponse(
             "tenant_summary.html",
             {
                 "request": request,
-                "tenant": tenant,
-                "latest_report_date": latest,
-                "latest_usage": latest_usage,
-                "latest_usage_pct": latest_usage_pct,
-                "history": hist,
-                "forecast": forecast,
-                "imminent_days": IMMINENT_DAYS,
-                "days_to_expiry": days_to_expiry,
-                "over_capacity": over_capacity,
-                "eta_within_threshold": eta_within_threshold,
-                "expired": expired,
-                "expiry_within_threshold": expiry_within_threshold,
-                "est_full_date": est_full_date,
+                **ctx,
                 "chart_labels": [h.report_date.isoformat() for h in hist],
                 "chart_used": [h.used_storage_gb or 0 for h in hist],
                 "chart_capacity": [h.storage_capacity_gb or 0 for h in hist],
             },
         )
+
+
+@app.get("/tenants/{customer_id}/report.pdf")
+def tenant_report_pdf(customer_id: str):
+    with SessionLocal() as session:
+        ctx = _build_tenant_context(session, customer_id)
+        if ctx is None:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+
+        pdf_bytes = build_tenant_report_pdf(ctx)
+
+    tenant = ctx["tenant"]
+    filename = f"tfo-usage-{tenant.customer_id}.pdf"
+    return Response(content=pdf_bytes, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="{filename}"',
+    })
 
 
 @app.get("/backup", response_class=HTMLResponse)

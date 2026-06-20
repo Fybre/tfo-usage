@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ tenant.customer_name or tenant.tenant_name }}</h1>
-<h3 class="text-muted">Tenant: {{ tenant.tenant_name or tenant.customer_id }}</h3>
+<div class="d-flex align-items-center justify-content-between mb-2">
+    <div>
+        <h1 class="mb-0">{{ tenant.customer_name or tenant.tenant_name }}</h1>
+        <h3 class="text-muted">Tenant: {{ tenant.tenant_name or tenant.customer_id }}</h3>
+    </div>
+    <a class="btn btn-outline-secondary" href="/tenants/{{ tenant.customer_id }}/report.pdf">Download PDF</a>
+</div>
 
 <div class="row">
     <div class="col-md-6">
