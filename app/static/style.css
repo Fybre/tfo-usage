@@ -31,7 +31,7 @@ select {
   color: #666;
   font-size: 0.9rem;
 }
-.row {
+.filter-row {
   display: flex;
   gap: 1rem;
   align-items: center;
