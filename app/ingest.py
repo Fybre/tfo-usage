@@ -22,6 +22,11 @@ COL_CAPACITY_GB = "Storage Capacity\n(GB)"
 COL_USAGE_PCT = "Storage Usage\n(%)"
 COL_EXCEEDED_GB = "Exceeded Storage\n(GB)"
 
+COL_CONCURRENT_USERS = "Concurrent User"
+COL_NAMED_USERS = "Named User"
+COL_READ_ONLY_USERS = "Read Only User"
+COL_DOCUMENTS = "Documents"
+
 
 def _file_hash_bytes(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
@@ -69,6 +74,11 @@ def _to_float(value):
         return float(s)
     except ValueError:
         return None
+
+
+def _to_int(value):
+    f = _to_float(value)
+    return None if f is None else int(f)
 
 
 def ingest_report(session, filename: str, content: bytes) -> tuple[ReportUpload, bool]:
@@ -126,6 +136,10 @@ def ingest_report(session, filename: str, content: bytes) -> tuple[ReportUpload,
             storage_capacity_gb=_to_float(row.get(COL_CAPACITY_GB)),
             storage_usage_pct=_to_float(row.get(COL_USAGE_PCT)),
             exceeded_storage_gb=_to_float(row.get(COL_EXCEEDED_GB)),
+            concurrent_users=_to_int(row.get(COL_CONCURRENT_USERS)),
+            named_users=_to_int(row.get(COL_NAMED_USERS)),
+            read_only_users=_to_int(row.get(COL_READ_ONLY_USERS)),
+            document_count=_to_int(row.get(COL_DOCUMENTS)),
             raw_json=json.dumps({k: (None if (isinstance(v, float) and pd.isna(v)) else v) for k, v in row.to_dict().items()}, default=str),
         )
         session.add(usage)

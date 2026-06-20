@@ -1,85 +1,149 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Tenant: {{ tenant.tenant_name or tenant.customer_id }}</h1>
+<h1>{{ tenant.customer_name or tenant.tenant_name }}</h1>
+<h3 class="text-muted">Tenant: {{ tenant.tenant_name or tenant.customer_id }}</h3>
 
-<div class="cards">
-    <div class="card">
-        <div class="label">Customer ID</div>
-        <div class="value">{{ tenant.customer_id }}</div>
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Summary</h5>
+
+                {% if latest_usage %}
+                <ul class="mb-3">
+                    <li><strong>Customer ID:</strong> {{ tenant.customer_id or 'N/A' }}</li>
+                    <li><strong>Latest date:</strong> {{ latest_usage.report_date }}</li>
+                    <li><strong>Expire date:</strong> {{ tenant.expire_date or 'N/A' }}</li>
+                    <li><strong>Creation date:</strong> {{ tenant.creation_date.date() if tenant.creation_date else
+                        'N/A' }}</li>
+                    <li><strong>Concurrent user:</strong> {{ latest_usage.concurrent_users if
+                        latest_usage.concurrent_users is not none else 'N/A' }}</li>
+                    <li><strong>Named user:</strong> {{ latest_usage.named_users if latest_usage.named_users is not
+                        none else 'N/A' }}</li>
+                    <li><strong>Read only user:</strong> {{ latest_usage.read_only_users if
+                        latest_usage.read_only_users is not none else 'N/A' }}</li>
+                    <li><strong>Documents:</strong> {{ latest_usage.document_count if latest_usage.document_count is
+                        not none else 'N/A' }}</li>
+                    <li><strong>Used:</strong> {{ '%.2f'|format(latest_usage.used_storage_gb or 0) }} GB</li>
+                    <li><strong>Capacity:</strong> {{ '%.1f'|format(latest_usage.storage_capacity_gb or 0) }} GB</li>
+                    <li><strong>Usage:</strong> {{ '%.2f'|format(latest_usage_pct or 0) }}%</li>
+                    <li><strong>Growth:</strong> {% if forecast and forecast.growth_gb_per_day is not none %}~{{
+                        '%.2f'|format(forecast.growth_gb_per_day * 30) }} GB/month{% else %}N/A{% endif %}</li>
+                    <li><strong>Est. days to full:</strong> {% if forecast and forecast.days_to_full is not none %}{{
+                        '%.1f'|format(forecast.days_to_full) }}{% else %}N/A{% endif %}</li>
+                    <li><strong>Est. full date:</strong> {% if est_full_date %}{{ est_full_date }}{% else %}N/A{%
+                        endif %}</li>
+                </ul>
+
+                <div class="d-flex gap-2">
+                    {% if over_capacity %}<span class="badge bg-danger">Over capacity</span>{% endif %}
+                    {% if eta_within_threshold %}<span class="badge bg-warning text-dark">ETA &le; {{ imminent_days
+                        }}d</span>{% endif %}
+                    {% if expired %}<span class="badge bg-danger">Expired</span>{% endif %}
+                    {% if expiry_within_threshold %}<span class="badge bg-warning text-dark">Expiry &le; {{
+                        imminent_days }}d</span>{% endif %}
+                </div>
+                {% else %}
+                <p class="text-muted">Not enough data yet.</p>
+                {% endif %}
+            </div>
+        </div>
     </div>
-    <div class="card">
-        <div class="label">Customer Name</div>
-        <div class="value">{{ tenant.customer_name or "—" }}</div>
-    </div>
-    <div class="card">
-        <div class="label">Reseller</div>
-        <div class="value">{{ tenant.reseller or "—" }}</div>
-    </div>
-    <div class="card">
-        <div class="label">Expire Date</div>
-        <div class="value">{{ tenant.expire_date or "—" }}</div>
+
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-body">
+                <h5 class="card-title">Storage over time</h5>
+                {% if chart_labels and chart_labels|length > 0 %}
+                <canvas id="usageChart" style="height:300px;"></canvas>
+                {% else %}
+                <p class="text-muted mb-0">No time-series data available yet.</p>
+                {% endif %}
+            </div>
+        </div>
     </div>
 </div>
 
-<h2>Latest usage ({{ latest_report_date or "—" }})</h2>
-{% if latest_usage %}
-<table>
-    <tbody>
-        <tr>
-            <th>Used (GB)</th>
-            <td>{{ '%.2f'|format(latest_usage.used_storage_gb or 0) }}</td>
-        </tr>
-        <tr>
-            <th>Capacity (GB)</th>
-            <td>{{ '%.2f'|format(latest_usage.storage_capacity_gb or 0) }}</td>
-        </tr>
-        <tr>
-            <th>Usage (%)</th>
-            <td>{{ '%.2f'|format(latest_usage.storage_usage_pct or 0) }}</td>
-        </tr>
-        <tr>
-            <th>Exceeded (GB)</th>
-            <td>{{ '%.2f'|format(latest_usage.exceeded_storage_gb or 0) }}</td>
-        </tr>
-    </tbody>
-</table>
-{% else %}
-<p>No usage rows yet for this tenant.</p>
-{% endif %}
+<div class="card">
+    <div class="card-body">
+        <h5 class="card-title">Records</h5>
+        <div class="table-responsive">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Used (GB)</th>
+                        <th>Capacity (GB)</th>
+                        <th>Usage (%)</th>
+                        <th>Concurrent</th>
+                        <th>Named</th>
+                        <th>Read Only</th>
+                        <th>Docs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for h in history|reverse %}
+                    <tr>
+                        <td>{{ h.report_date }}</td>
+                        <td>{{ '%.3f'|format(h.used_storage_gb or 0) }}</td>
+                        <td>{{ '%.3f'|format(h.storage_capacity_gb or 0) }}</td>
+                        <td>{{ '%.3f'|format(((h.used_storage_gb or 0) / h.storage_capacity_gb * 100) if h.storage_capacity_gb else (h.storage_usage_pct or 0)) }}</td>
+                        <td>{{ h.concurrent_users if h.concurrent_users is not none else '' }}</td>
+                        <td>{{ h.named_users if h.named_users is not none else '' }}</td>
+                        <td>{{ h.read_only_users if h.read_only_users is not none else '' }}</td>
+                        <td>{{ h.document_count if h.document_count is not none else '' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
 
-<h2>Forecast</h2>
-{% if forecast and forecast.growth_gb_per_day is not none %}
-<ul>
-    <li>Growth rate: {{ '%.4f'|format(forecast.growth_gb_per_day) }} GB/day ({{
-        '%.2f'|format(forecast.growth_gb_per_day*30) }} GB/month approx).</li>
-    <li>Days to full: {{ (forecast.days_to_full is not none) and ('%.1f'|format(forecast.days_to_full)) or '—' }}.</li>
-</ul>
-{% else %}
-<p>Not enough data to forecast yet (need at least 2 reports).</p>
-{% endif %}
+<script>
+    window.addEventListener('DOMContentLoaded', function () {
+        const canvas = document.getElementById('usageChart');
+        if (!canvas || typeof Chart === 'undefined') return;
 
-<h2>History (last {{ history|length }})</h2>
-{% if history %}
-<table>
-    <thead>
-        <tr>
-            <th>Report date</th>
-            <th>Used (GB)</th>
-            <th>Capacity (GB)</th>
-            <th>Usage (%)</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for h in history %}
-        <tr>
-            <td>{{ h.report_date }}</td>
-            <td>{{ h.used_storage_gb }}</td>
-            <td>{{ h.storage_capacity_gb }}</td>
-            <td>{{ h.storage_usage_pct }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% endif %}
+        const chartLabels = {{ chart_labels | tojson }};
+        const seriesUsed = {{ chart_used | tojson }};
+        const seriesCapacity = {{ chart_capacity | tojson }};
 
+        new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [
+                    {
+                        label: 'Used (GB)',
+                        data: seriesUsed,
+                        borderColor: '#0d6efd',
+                        backgroundColor: 'rgba(13,110,253,0.15)',
+                        pointRadius: 3,
+                        tension: 0.2
+                    },
+                    {
+                        label: 'Capacity (GB)',
+                        data: seriesCapacity,
+                        borderColor: '#6c757d',
+                        backgroundColor: 'rgba(108,117,125,0.15)',
+                        pointRadius: 3,
+                        tension: 0.2
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: { title: { display: true, text: 'Report Date' } },
+                    y: { beginAtZero: true, title: { display: true, text: 'GB' } }
+                }
+            }
+        });
+    });
+</script>
 {% endblock %}

@@ -1,111 +1,99 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>TFO Usage</h1>
 
-<div class="cards">
-    <div class="card">
-        <div class="label">Tenants</div>
-        <div class="value">{{ counts.tenants }}</div>
-    </div>
-    <div class="card">
-        <div class="label">Uploads</div>
-        <div class="value">{{ counts.uploads }}</div>
-    </div>
-    <div class="card">
-        <div class="label">Latest report date</div>
-        <div class="value">{{ counts.latest_report_date or "—" }}</div>
-    </div>
+<div class="d-flex align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="me-3 mb-0">TFO Usage</h1>
+
+    <span class="badge bg-danger me-2">Over capacity: {{ flagged_over }}</span>
+    <span class="badge bg-warning text-dark me-2">Storage ETA &le; {{ imminent_days }}d: {{ flagged_eta }}</span>
+    <span class="badge bg-dark me-2">Support Expired: {{ flagged_expired }}</span>
+    <span class="badge bg-secondary">Support Expiry &le; {{ imminent_days }}d: {{ flagged_expiry }}</span>
+
+    <div class="flex-grow-1"></div>
+
+    <form class="d-flex align-items-center" method="get" action="/">
+        <input type="hidden" name="submitted" value="1">
+        <input type="hidden" name="hide_expired" value="0">
+        <div class="form-check me-2">
+            <input class="form-check-input" type="checkbox" id="hideExpired" name="hide_expired" value="1" {% if
+                hide_expired %}checked{% endif %}>
+            <label class="form-check-label" for="hideExpired">Hide expired</label>
+        </div>
+
+        <input class="form-control me-2" type="search" name="q" placeholder="Search tenants…" aria-label="Search"
+            value="{{ q or '' }}">
+        <button class="btn btn-outline-primary me-1" type="submit">Apply</button>
+        {% if q or not hide_expired %}
+        <a class="btn btn-link" href="/">Clear</a>
+        {% endif %}
+    </form>
 </div>
 
-<h2>Top storage usage (latest report)</h2>
-{% if top %}
-<table>
-    <thead>
-        <tr>
-            <th>Customer ID</th>
-            <th>Tenant</th>
-            <th>Used (GB)</th>
-            <th>Capacity (GB)</th>
-            <th>Usage (%)</th>
-            <th></th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for t, u in top %}
-        <tr>
-            <td>{{ t.customer_id }}</td>
-            <td>{{ t.tenant_name }}</td>
-            <td>{{ '%.2f'|format(u.used_storage_gb or 0) }}</td>
-            <td>{{ '%.2f'|format(u.storage_capacity_gb or 0) }}</td>
-            <td>{{ '%.2f'|format(u.storage_usage_pct or 0) }}</td>
-            <td><a href="/tenants/{{ t.customer_id }}">View</a></td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p>No reports uploaded yet.</p>
+{% if not counts.latest_report_date %}
+<p>No reports uploaded yet. <a href="/upload">Upload one</a> to get started.</p>
+{% elif cards|length == 0 %}
+<p class="text-muted">No tenants match your search. Try another name or clear the filter.</p>
 {% endif %}
 
-{% if counts.latest_report_date and cards is defined %}
-<h2>Tenant cards ({{ counts.latest_report_date }})</h2>
-<form method="get" action="/" class="row">
-    <label>Show:
-        <select name="show">
-            <option value="issues" {% if show=='issues' %}selected{% endif %}>Issues only</option>
-            <option value="all" {% if show=='all' %}selected{% endif %}>All tenants</option>
-        </select>
-    </label>
-    <label>Sort:
-        <select name="sort">
-            <option value="severity" {% if sort=='severity' %}selected{% endif %}>Severity</option>
-            <option value="growth" {% if sort=='growth' %}selected{% endif %}>Growth (GB/day)</option>
-            <option value="days_to_full" {% if sort=='days_to_full' %}selected{% endif %}>Days to full (est)</option>
-            <option value="usage_pct" {% if sort=='usage_pct' %}selected{% endif %}>Usage (%)</option>
-            <option value="exceeded" {% if sort=='exceeded' %}selected{% endif %}>Exceeded (GB)</option>
-            <option value="days_to_expiry" {% if sort=='days_to_expiry' %}selected{% endif %}>Days to expiry</option>
-            <option value="tenant" {% if sort=='tenant' %}selected{% endif %}>Tenant name</option>
-        </select>
-    </label>
-    <label>Direction:
-        <select name="direction">
-            <option value="desc" {% if direction=='desc' %}selected{% endif %}>Desc</option>
-            <option value="asc" {% if direction=='asc' %}selected{% endif %}>Asc</option>
-        </select>
-    </label>
-    <button type="submit">Apply</button>
-</form>
-
-{% if not cards %}
-<p>Nothing to show for this filter.</p>
-{% else %}
-<div class="cards cards-wide">
+<div class="row row-cols-1 row-cols-md-2 g-4">
     {% for c in cards %}
-    <div class="card tenant-card tenant-card--{{ c.severity }}">
-        <div class="label">
-            <a href="/tenants/{{ c.customer_id }}">{{ c.tenant_name or c.customer_id }}</a>
-        </div>
-        <div class="hint">{{ c.customer_name or "—" }}</div>
-        <div class="tenant-metrics">
-            <div><span class="metric-label">Usage</span>
-                <span class="metric-value">{{ (c.usage_pct is not none) and ('%.1f'|format(c.usage_pct)) or '—' }}%</span>
-            </div>
-            <div><span class="metric-label">Exceeded</span>
-                <span class="metric-value">{{ (c.exceeded_gb is not none) and ('%.2f'|format(c.exceeded_gb)) or '—' }} GB</span>
-            </div>
-            <div><span class="metric-label">Growth</span>
-                <span class="metric-value">{{ (c.growth_gb_per_day is not none) and ('%.4f'|format(c.growth_gb_per_day)) or '—' }} GB/day</span>
-            </div>
-            <div><span class="metric-label">Days to full</span>
-                <span class="metric-value">{{ (c.days_to_full is not none) and ('%.1f'|format(c.days_to_full)) or '—' }}</span>
-            </div>
-            <div><span class="metric-label">Days to expiry</span>
-                <span class="metric-value">{{ c.days_to_expiry is not none and c.days_to_expiry or '—' }}</span>
+    {% set critical = c.over_capacity or c.expired %}
+    {% set warning = (not critical) and (c.eta_within_threshold or c.expiry_within_threshold) %}
+    <div class="col">
+        <div class="card h-100 border-2 {% if critical %}border-danger{% elif warning %}border-warning{% endif %}">
+            <div class="card-body"
+                style="{% if critical %}background-color:#f8d7da;{% elif warning %}background-color:#fff3cd;{% endif %}">
+                <div class="d-flex align-items-center justify-content-between">
+                    <h5 class="card-title mb-0">{{ c.customer_name or c.tenant_name }}</h5>
+                    <div class="d-flex gap-2">
+                        {% if c.over_capacity %}<span class="badge bg-danger">Over capacity</span>{% endif %}
+                        {% if c.eta_within_threshold %}<span class="badge bg-warning text-dark">Storage ETA &le; {{
+                            imminent_days }}d</span>{% endif %}
+                        {% if c.expired %}<span class="badge bg-dark">Support Expired</span>{% endif %}
+                        {% if c.expiry_within_threshold %}<span class="badge bg-secondary">Support Expiry &le; {{
+                            imminent_days }}d</span>{% endif %}
+                    </div>
+                </div>
+                <h6 class="card-subtitle mt-2 text-muted">{{ c.tenant_name }}</h6>
+
+                <p class="card-text mt-2">
+                    Latest: <strong>{{ '%.2f'|format(c.used_gb or 0) }} GB</strong>
+                    of {{ '%.1f'|format(c.capacity_gb or 0) }} GB
+                    ({{ '%.2f'|format(c.usage_pct or 0) }}%).<br>
+                    Growth:
+                    {% if c.growth_gb_per_month is not none %}~{{ '%.2f'|format(c.growth_gb_per_month) }} GB/month
+                    {% else %}N/A (need &ge;2 reports){% endif %}.<br>
+                    {% if c.days_to_full is not none %}
+                    {% if c.est_full_date %}
+                    Est. full: in {{ '%.1f'|format(c.days_to_full) }} days ({{ c.est_full_date }}).
+                    {% else %}
+                    Est. full: &gt; 50 years (ETA capped).
+                    {% endif %}
+                    {% else %}
+                    Est. full: N/A.
+                    {% endif %}
+                </p>
+
+                <p class="card-text mb-2">
+                    Support Expiry Date:
+                    {% if c.expire_date %}<strong>{{ c.expire_date }}</strong>{% else %}<span
+                        class="text-muted">N/A</span>{% endif %}
+                    <br>
+                    Days to Expiry:
+                    {% if c.days_to_expiry is not none %}
+                    <strong>{{ c.days_to_expiry }}</strong>
+                    {% if c.days_to_expiry < 0 %} <span class="text-danger">(expired {{ -c.days_to_expiry }} days
+                        ago)</span>
+                        {% endif %}
+                        {% else %}
+                        <span class="text-muted">N/A</span>
+                        {% endif %}
+                </p>
+
+                <a class="btn btn-primary" href="/tenants/{{ c.customer_id }}">View details</a>
             </div>
         </div>
     </div>
     {% endfor %}
 </div>
-{% endif %}
-{% endif %}
 {% endblock %}

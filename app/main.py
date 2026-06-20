@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from dateutil.relativedelta import relativedelta
@@ -10,9 +10,9 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import desc, func, select
+from sqlalchemy import func, select
 
-from .config import DATA_DIR, DB_PATH, DEFAULT_EXPIRY_MONTHS
+from .config import DATA_DIR, DB_PATH, DEFAULT_EXPIRY_MONTHS, IMMINENT_DAYS
 from .db import make_session_factory, sqlite_engine
 from .forecast import forecast_linear
 from .ingest import ingest_report
@@ -46,12 +46,21 @@ class TenantCard:
     usage_pct: float | None
     exceeded_gb: float | None
 
+    concurrent_users: int | None
+    named_users: int | None
+    read_only_users: int | None
+    document_count: int | None
+
     growth_gb_per_day: float | None
+    growth_gb_per_month: float | None
     days_to_full: float | None
+    est_full_date: date | None
     days_to_expiry: int | None
 
-    has_issue: bool
-    severity: str  # ok|warn|bad
+    over_capacity: bool
+    eta_within_threshold: bool
+    expired: bool
+    expiry_within_threshold: bool
 
 
 def _days_to_expiry(expire_date: date | None, reference: date | None) -> int | None:
@@ -66,19 +75,9 @@ def _safe_div(n: float | None, d: float | None) -> float | None:
     return n / d
 
 
-def _num_for_sort(value: float | int | None, *, reverse: bool) -> float:
-    if value is None:
-        return float("-inf") if reverse else float("inf")
-    return float(value)
-
-
 @app.get("/", response_class=HTMLResponse)
-def home(
-    request: Request,
-    sort: str = "severity",
-    direction: str = "desc",
-    show: str = "issues",
-):
+def home(request: Request, q: str = "", submitted: str = "", hide_expired: str = ""):
+    hide_expired_checked = (hide_expired == "1") if submitted == "1" else True
     with SessionLocal() as session:
         latest = _latest_report_date(session)
         counts = {
@@ -86,16 +85,6 @@ def home(
             "uploads": session.execute(select(func.count(ReportUpload.id))).scalar_one(),
             "latest_report_date": latest,
         }
-
-        top = []
-        if latest:
-            top = session.execute(
-                select(Tenant, TenantUsage)
-                .join(TenantUsage, TenantUsage.customer_id == Tenant.customer_id)
-                .where(TenantUsage.report_date == latest)
-                .order_by(desc(TenantUsage.storage_usage_pct))
-                .limit(20)
-            ).all()
 
         cards: list[TenantCard] = []
         if latest:
@@ -106,6 +95,10 @@ def home(
                     TenantUsage.storage_capacity_gb.label("capacity_gb"),
                     TenantUsage.storage_usage_pct.label("usage_pct"),
                     TenantUsage.exceeded_storage_gb.label("exceeded_gb"),
+                    TenantUsage.concurrent_users.label("concurrent_users"),
+                    TenantUsage.named_users.label("named_users"),
+                    TenantUsage.read_only_users.label("read_only_users"),
+                    TenantUsage.document_count.label("document_count"),
                 )
                 .where(TenantUsage.report_date == latest)
                 .subquery()
@@ -134,37 +127,62 @@ def home(
                     latest_usage_sq.c.capacity_gb,
                     latest_usage_sq.c.usage_pct,
                     latest_usage_sq.c.exceeded_gb,
+                    latest_usage_sq.c.concurrent_users,
+                    latest_usage_sq.c.named_users,
+                    latest_usage_sq.c.read_only_users,
+                    latest_usage_sq.c.document_count,
                     prev_used_sq.label("prev_used_gb"),
                     prev_date_sq,
                 )
                 .join(latest_usage_sq, latest_usage_sq.c.customer_id == Tenant.customer_id)
             ).all()
 
-            for tenant, used_gb, capacity_gb, usage_pct, exceeded_gb, prev_used_gb, prev_report_date in rows:
+            for (
+                tenant,
+                used_gb,
+                capacity_gb,
+                usage_pct,
+                exceeded_gb,
+                concurrent_users,
+                named_users,
+                read_only_users,
+                document_count,
+                prev_used_gb,
+                prev_report_date,
+            ) in rows:
+                if capacity_gb:
+                    usage_pct = (used_gb or 0) / capacity_gb * 100.0
+
                 growth = None
                 if used_gb is not None and prev_used_gb is not None and prev_report_date:
                     day_span = (latest - prev_report_date).days
                     growth = _safe_div(used_gb - prev_used_gb, float(day_span)) if day_span > 0 else None
 
                 days_to_full = None
+                est_full_date = None
                 if growth is not None and growth > 0 and used_gb is not None and capacity_gb is not None:
                     remaining = capacity_gb - used_gb
                     days_to_full = 0.0 if remaining <= 0 else remaining / growth
+                    if days_to_full <= 50 * 365:
+                        est_full_date = latest + timedelta(days=days_to_full)
 
                 days_to_expiry = _days_to_expiry(tenant.expire_date, latest)
 
-                is_expired = (days_to_expiry is not None) and (days_to_expiry < 0)
-                is_expiring_soon = (days_to_expiry is not None) and (0 <= days_to_expiry <= 90)
-                is_over = (exceeded_gb or 0) > 0
-                is_near_full = (usage_pct or 0) >= 90
-                is_days_to_full_soon = (days_to_full is not None) and (days_to_full <= 60)
+                expired = (days_to_expiry is not None) and (days_to_expiry < 0)
+                expiry_within_threshold = (days_to_expiry is not None) and (0 <= days_to_expiry <= IMMINENT_DAYS)
+                over_capacity = (
+                    (capacity_gb and used_gb is not None and used_gb > capacity_gb)
+                    or ((usage_pct or 0) > 100.0)
+                    or ((exceeded_gb or 0) > 0)
+                )
+                eta_within_threshold = (days_to_full is not None) and (days_to_full <= IMMINENT_DAYS)
 
-                has_issue = is_over or is_near_full or is_days_to_full_soon or is_expired or is_expiring_soon
-                severity = "ok"
-                if is_expired or is_over or ((usage_pct or 0) >= 98):
-                    severity = "bad"
-                elif has_issue:
-                    severity = "warn"
+                if q and q.lower() not in (tenant.tenant_name or "").lower() and q.lower() not in (
+                    tenant.customer_name or ""
+                ).lower():
+                    continue
+                if hide_expired_checked and expired:
+                    continue
 
                 cards.append(
                     TenantCard(
@@ -177,51 +195,47 @@ def home(
                         capacity_gb=capacity_gb,
                         usage_pct=usage_pct,
                         exceeded_gb=exceeded_gb,
+                        concurrent_users=concurrent_users,
+                        named_users=named_users,
+                        read_only_users=read_only_users,
+                        document_count=document_count,
                         growth_gb_per_day=growth,
+                        growth_gb_per_month=(growth * 30 if growth is not None else None),
                         days_to_full=days_to_full,
+                        est_full_date=est_full_date,
                         days_to_expiry=days_to_expiry,
-                        has_issue=has_issue,
-                        severity=severity,
+                        over_capacity=over_capacity,
+                        eta_within_threshold=eta_within_threshold,
+                        expired=expired,
+                        expiry_within_threshold=expiry_within_threshold,
                     )
                 )
 
-        if show == "issues":
-            cards = [c for c in cards if c.has_issue]
+        def sort_key(c: TenantCard):
+            critical = c.over_capacity or c.expired
+            warning = (not critical) and (c.eta_within_threshold or c.expiry_within_threshold)
+            return (not critical, not warning, (c.customer_name or c.tenant_name or "").lower())
 
-        direction = (direction or "desc").lower()
-        reverse = direction != "asc"
+        cards.sort(key=sort_key)
 
-        def sort_fn(c: TenantCard):
-            if sort == "growth":
-                return _num_for_sort(c.growth_gb_per_day, reverse=reverse)
-            if sort == "days_to_full":
-                # smaller is worse, so default direction for this is asc
-                return _num_for_sort(c.days_to_full, reverse=reverse)
-            if sort == "days_to_expiry":
-                return _num_for_sort(c.days_to_expiry, reverse=reverse)
-            if sort == "usage_pct":
-                return _num_for_sort(c.usage_pct, reverse=reverse)
-            if sort == "exceeded":
-                return _num_for_sort(c.exceeded_gb, reverse=reverse)
-            if sort == "tenant":
-                return (0, (c.tenant_name or "").lower())
-            if sort == "severity":
-                sev = {"ok": 0, "warn": 1, "bad": 2}.get(c.severity, 0)
-                return sev
-            return _num_for_sort(c.usage_pct, reverse=reverse)
-
-        cards.sort(key=sort_fn, reverse=reverse)
+        flagged_over = sum(1 for c in cards if c.over_capacity)
+        flagged_eta = sum(1 for c in cards if c.eta_within_threshold)
+        flagged_expired = sum(1 for c in cards if c.expired)
+        flagged_expiry = sum(1 for c in cards if c.expiry_within_threshold)
 
         return templates.TemplateResponse(
             "home.html",
             {
                 "request": request,
                 "counts": counts,
-                "top": top,
                 "cards": cards,
-                "sort": sort,
-                "direction": direction,
-                "show": show,
+                "q": q,
+                "hide_expired": hide_expired_checked,
+                "imminent_days": IMMINENT_DAYS,
+                "flagged_over": flagged_over,
+                "flagged_eta": flagged_eta,
+                "flagged_expired": flagged_expired,
+                "flagged_expiry": flagged_expiry,
             },
         )
 
@@ -308,7 +322,6 @@ def tenant_summary(request: Request, customer_id: str):
                 select(TenantUsage)
                 .where(TenantUsage.customer_id == customer_id)
                 .order_by(TenantUsage.report_date.desc())
-                .limit(12)
             )
             .scalars()
             .all()
@@ -316,11 +329,38 @@ def tenant_summary(request: Request, customer_id: str):
         hist = list(reversed(hist))
 
         forecast = None
+        days_to_expiry = None
+        over_capacity = False
+        eta_within_threshold = False
+        expired = False
+        expiry_within_threshold = False
+        est_full_date = None
+        latest_usage_pct = None
+
         if hist:
             dates = [h.report_date for h in hist]
             used = [h.used_storage_gb for h in hist]
             cap = hist[-1].storage_capacity_gb if hist[-1].storage_capacity_gb is not None else None
             forecast = forecast_linear(dates, used, cap)
+
+            days_to_expiry = _days_to_expiry(tenant.expire_date, latest_usage.report_date if latest_usage else None)
+            expired = (days_to_expiry is not None) and (days_to_expiry < 0)
+            expiry_within_threshold = (days_to_expiry is not None) and (0 <= days_to_expiry <= IMMINENT_DAYS)
+
+            if latest_usage:
+                used_gb = latest_usage.used_storage_gb
+                capacity_gb = latest_usage.storage_capacity_gb
+                latest_usage_pct = (used_gb or 0) / capacity_gb * 100.0 if capacity_gb else (latest_usage.storage_usage_pct or 0)
+                over_capacity = (
+                    (capacity_gb and used_gb is not None and used_gb > capacity_gb)
+                    or (latest_usage_pct > 100.0)
+                    or ((latest_usage.exceeded_storage_gb or 0) > 0)
+                )
+
+            if forecast.days_to_full is not None:
+                eta_within_threshold = forecast.days_to_full <= IMMINENT_DAYS
+                if forecast.days_to_full <= 50 * 365 and latest_usage:
+                    est_full_date = latest_usage.report_date + timedelta(days=forecast.days_to_full)
 
         return templates.TemplateResponse(
             "tenant_summary.html",
@@ -329,8 +369,19 @@ def tenant_summary(request: Request, customer_id: str):
                 "tenant": tenant,
                 "latest_report_date": latest,
                 "latest_usage": latest_usage,
+                "latest_usage_pct": latest_usage_pct,
                 "history": hist,
                 "forecast": forecast,
+                "imminent_days": IMMINENT_DAYS,
+                "days_to_expiry": days_to_expiry,
+                "over_capacity": over_capacity,
+                "eta_within_threshold": eta_within_threshold,
+                "expired": expired,
+                "expiry_within_threshold": expiry_within_threshold,
+                "est_full_date": est_full_date,
+                "chart_labels": [h.report_date.isoformat() for h in hist],
+                "chart_used": [h.used_storage_gb or 0 for h in hist],
+                "chart_capacity": [h.storage_capacity_gb or 0 for h in hist],
             },
         )
 

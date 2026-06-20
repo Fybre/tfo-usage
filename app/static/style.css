@@ -4,45 +4,6 @@ body {
   background: #fafafa;
   color: #111;
 }
-.nav {
-  display: flex;
-  gap: 1rem;
-  padding: 1rem;
-  background: #111;
-  color: #fff;
-}
-.nav a {
-  color: #fff;
-  text-decoration: none;
-}
-.container {
-  padding: 1rem;
-  max-width: 1100px;
-  margin: 0 auto;
-}
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 1rem;
-  margin: 1rem 0;
-}
-.cards.cards-wide {
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-}
-.card {
-  background: #fff;
-  border: 1px solid #e5e5e5;
-  border-radius: 8px;
-  padding: 0.75rem;
-}
-.card .label {
-  font-size: 0.85rem;
-  color: #555;
-}
-.card .value {
-  font-size: 1.2rem;
-  font-weight: 600;
-}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -117,35 +78,6 @@ select {
   color: #111;
 }
 
-.tenant-card a {
-  color: inherit;
-  text-decoration: none;
-}
-.tenant-card a:hover {
-  text-decoration: underline;
-}
-.tenant-card--warn {
-  border-color: #f0c36d;
-  box-shadow: 0 0 0 2px rgba(240, 195, 109, 0.12) inset;
-}
-.tenant-card--bad {
-  border-color: #e36b6b;
-  box-shadow: 0 0 0 2px rgba(227, 107, 107, 0.12) inset;
-}
-.tenant-metrics {
-  margin-top: 0.6rem;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.35rem 0.75rem;
-}
-.metric-label {
-  color: #555;
-  font-size: 0.85rem;
-}
-.metric-value {
-  font-weight: 600;
-  margin-left: 0.35rem;
-}
 .status-error td {
   color: #b23b3b;
 }

@@ -39,6 +39,11 @@ class TenantUsage(Base):
     storage_usage_pct = Column(Float, nullable=True)
     exceeded_storage_gb = Column(Float, nullable=True)
 
+    concurrent_users = Column(Integer, nullable=True)
+    named_users = Column(Integer, nullable=True)
+    read_only_users = Column(Integer, nullable=True)
+    document_count = Column(Integer, nullable=True)
+
     raw_json = Column(Text, nullable=True)
 
     __table_args__ = (
