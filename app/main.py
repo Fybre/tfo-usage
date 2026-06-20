@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import delete, func, select
 
 from .config import DATA_DIR, DB_PATH, DEFAULT_EXPIRY_MONTHS, IMMINENT_DAYS
-from .db import make_session_factory, sqlite_engine
+from .db import make_session_factory, sqlite_engine, sync_schema
 from .forecast import forecast_linear
 from .ingest import ingest_report
 from .models import Base, ReportUpload, Tenant, TenantUsage
@@ -28,6 +28,7 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 engine = sqlite_engine(str(DB_PATH))
 SessionLocal = make_session_factory(engine)
 Base.metadata.create_all(bind=engine)
+sync_schema(engine, Base)
 
 
 def _latest_report_date(session) -> date | None:
